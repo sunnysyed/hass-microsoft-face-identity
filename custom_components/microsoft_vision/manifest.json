@@ -1,5 +1,5 @@
 {
-  "domain": "microsoft_face_identity",
+  "domain": "microsoft_face_api_identify",
   "name": "Microsoft Face Identity custom component",
   "documentation": "https://github.com/sunnysyed",
   "requirements": [],

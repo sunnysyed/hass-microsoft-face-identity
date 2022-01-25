@@ -1,1 +1,1 @@
-"""The microsoft_vision component."""
+"""The microsoft_face_api component."""

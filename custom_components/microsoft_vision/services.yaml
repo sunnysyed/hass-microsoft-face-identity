@@ -1,0 +1,10 @@
+snapshot:
+  name: Take Snapshot
+  description: Create and identify snapshot
+  fields:
+    entity:
+      description: Camera entity
+      example: camera.generic_stream
+      selector:
+        entity:
+          domain: camera

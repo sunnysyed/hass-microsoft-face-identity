@@ -9,12 +9,12 @@ import homeassistant.helpers.config_validation as cv
 
 from homeassistant.helpers.entity import Entity
 from homeassistant.components.image_processing import DOMAIN, CONF_CONFIDENCE, ImageProcessingFaceEntity
-from homeassistant.const import CONF_NAME, CONF_API_KEY, CONF_URL, CONF_TIMEOUT, ATTR_NAME, ATTR_ENTITY_ID, HTTP_BAD_REQUEST, HTTP_OK, HTTP_UNAUTHORIZED, CONF_SOURCE, CONF_ENTITY_ID
+from homeassistant.const import CONF_NAME, CONF_API_KEY, CONF_URL, CONF_TIMEOUT, ATTR_NAME, ATTR_ENTITY_ID, CONF_SOURCE, CONF_ENTITY_ID
 from homeassistant.exceptions import HomeAssistantError
 
 _LOGGER = logging.getLogger(__name__)
 
-MICROSOFT_FACE_IDENTITY = 'microsoft_face_identity'
+MICROSOFT_FACE_IDENTIFY = 'microsoft_face_api_identify'
 
 FACE_API_URL = "api.cognitive.microsoft.com/face/v1.0/{0}"
 
@@ -54,8 +54,8 @@ SCHEMA_CALL_SERVICE = vol.Schema({
 
 async def async_setup_platform(hass, config, add_devices, discovery_info=None):
     """Setup the platform."""
-    if MICROSOFT_FACE_IDENTITY not in hass.data:
-        hass.data[MICROSOFT_FACE_IDENTITY] = None
+    if MICROSOFT_FACE_IDENTIFY not in hass.data:
+        hass.data[MICROSOFT_FACE_IDENTIFY] = None
     try:
         devices = []
         for camera in config[CONF_SOURCE]:            
@@ -67,17 +67,17 @@ async def async_setup_platform(hass, config, add_devices, discovery_info=None):
                 config.get(CONF_GROUP),
                 config.get(CONF_CONFIDENCE),
                 config.get(CONF_RECOGNITION_MODEL),
-                config.get(CONF_DETECTION_MODEL)
+                config.get(CONF_DETECTION_MODEL),
                 camera.get(CONF_NAME),
             )
             devices.append(device)
-            hass.data[MICROSOFT_FACE_IDENTITY] = device
+            hass.data[MICROSOFT_FACE_IDENTIFY] = device
         add_devices(devices)
     except HomeAssistantError as err:
         _LOGGER.error("Error calling setup: %s", err)
 
     async def detect(service):
-        device = hass.data[MICROSOFT_FACE_IDENTITY]
+        device = hass.data[MICROSOFT_FACE_IDENTIFY]
         try:
             await device.call_api(SERVICE_DETECT)
         except HomeAssistantError as err:
@@ -86,7 +86,7 @@ async def async_setup_platform(hass, config, add_devices, discovery_info=None):
     hass.services.async_register(DOMAIN, SERVICE_DETECT, detect)
 
     async def identify(service):
-        device = hass.data[MICROSOFT_FACE_IDENTITY]
+        device = hass.data[MICROSOFT_FACE_IDENTIFY]
         try:
             await device.call_api(SERVICE_IDENTIFY)
         except HomeAssistantError as err:
@@ -94,25 +94,25 @@ async def async_setup_platform(hass, config, add_devices, discovery_info=None):
 
     hass.services.async_register(DOMAIN, SERVICE_IDENTIFY, identify)
 
-    async def snapshot(service):
-        camera_entity = service.data.get(ATTR_CAMERA_ENTITY)
-        camera = hass.components.camera
-        device = hass.data[MICROSOFT_FACE_IDENTITY]
-        image = None
-        try:
-            image = await camera.async_get_image(camera_entity)
-            device.set_image(image)
-        except HomeAssistantError as err:
-            _LOGGER.error("Error on receive image from entity: %s", err)
+    # async def snapshot(service):
+    #     camera_entity = service.data.get(ATTR_CAMERA_ENTITY)
+    #     camera = hass.components.camera
+    #     device = hass.data[MICROSOFT_FACE_IDENTIFY]
+    #     image = None
+    #     try:
+    #         image = await camera.async_get_image(camera_entity)
+    #         device._image(image)
+    #     except HomeAssistantError as err:
+    #         _LOGGER.error("Error on receive image from entity: %s", err)
 
-    hass.services.async_register(DOMAIN, SERVICE_SNAPSHOT, snapshot, schema=SCHEMA_CALL_SERVICE)
+    # hass.services.async_register(DOMAIN, SERVICE_SNAPSHOT, snapshot, schema=SCHEMA_CALL_SERVICE)
   
     return True
 
 class MicrosoftFaceIdentifyDevice(ImageProcessingFaceEntity):
     """Representation of a platform."""
 
-    def __init__(self, hass, camera_entity, region, api_key, group, confidence, recognition_model, detection_model, name=MICROSOFT_FACE_IDENTITY):
+    def __init__(self, hass, camera_entity, region, api_key, group, confidence, recognition_model, detection_model, name):
         """Initialize the platform."""
         self._hass = hass
         self._camera = camera_entity
@@ -127,6 +127,9 @@ class MicrosoftFaceIdentifyDevice(ImageProcessingFaceEntity):
         self._group = group
         self._recognition_model = recognition_model
         self._detection_model = detection_model
+        self.faces = []
+        self.total_faces = 0
+
 
     @property
     def name(self):
@@ -158,8 +161,9 @@ class MicrosoftFaceIdentifyDevice(ImageProcessingFaceEntity):
         """Return camera entity id from process pictures."""
         return self._camera
 
-    async def call_api(self, service):
-        await self._hass.async_add_executor_job(self.post_api, service)
+    async def call_api(self, method, function, data=None, binary=False, params=None):
+        _LOGGER.info("MAKE API CALL")
+        # await self._hass.async_add_executor_job(self.post_api, service)
 
     def post_api(self, service):
         # try:
@@ -214,6 +218,7 @@ class MicrosoftFaceIdentifyDevice(ImageProcessingFaceEntity):
         _LOGGER.info("MAKE API CALL")
     
     async def async_process_image(self, image):
+        _LOGGER.info("async_process_image")
         """Process image.
         This method is a coroutine.
         """
