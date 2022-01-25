@@ -71,28 +71,28 @@ async def async_setup_platform(hass, config, add_devices, discovery_info=None):
                 camera.get(CONF_NAME),
             )
             devices.append(device)
-            hass.data[MICROSOFT_FACE_IDENTIFY] = device
+            # hass.data[MICROSOFT_FACE_IDENTIFY] = device
         add_devices(devices)
     except HomeAssistantError as err:
         _LOGGER.error("Error calling setup: %s", err)
 
-    async def detect(service):
-        device = hass.data[MICROSOFT_FACE_IDENTIFY]
-        try:
-            await device.call_api(SERVICE_DETECT)
-        except HomeAssistantError as err:
-            _LOGGER.error("Error calling analyze: %s", err)
+    # async def detect(service):
+    #     device = hass.data[MICROSOFT_FACE_IDENTIFY]
+    #     try:
+    #         await device.call_api(SERVICE_DETECT)
+    #     except HomeAssistantError as err:
+    #         _LOGGER.error("Error calling analyze: %s", err)
 
-    hass.services.async_register(DOMAIN, SERVICE_DETECT, detect)
+    # hass.services.async_register(DOMAIN, SERVICE_DETECT, detect)
 
-    async def identify(service):
-        device = hass.data[MICROSOFT_FACE_IDENTIFY]
-        try:
-            await device.call_api(SERVICE_IDENTIFY)
-        except HomeAssistantError as err:
-            _LOGGER.error("Error calling describe: %s", err)
+    # async def identify(service):
+    #     device = hass.data[MICROSOFT_FACE_IDENTIFY]
+    #     try:
+    #         await device.call_api(SERVICE_IDENTIFY)
+    #     except HomeAssistantError as err:
+    #         _LOGGER.error("Error calling describe: %s", err)
 
-    hass.services.async_register(DOMAIN, SERVICE_IDENTIFY, identify)
+    # hass.services.async_register(DOMAIN, SERVICE_IDENTIFY, identify)
 
     # async def snapshot(service):
     #     camera_entity = service.data.get(ATTR_CAMERA_ENTITY)
