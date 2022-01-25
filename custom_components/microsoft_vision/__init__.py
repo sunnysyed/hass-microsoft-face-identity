@@ -1,0 +1,1 @@
+"""The microsoft_vision component."""

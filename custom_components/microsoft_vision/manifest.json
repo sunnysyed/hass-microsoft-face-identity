@@ -1,0 +1,11 @@
+{
+  "domain": "microsoft_face_identity",
+  "name": "Microsoft Face Identity custom component",
+  "documentation": "https://github.com/sunnysyed",
+  "requirements": [],
+  "dependencies": [],
+  "codeowners": [
+    "@sunnysyed"
+  ],
+  "version": "0.0.1"
+}
