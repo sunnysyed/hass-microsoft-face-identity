@@ -1,260 +1,205 @@
-
-import asyncio
-import logging
-import requests
 import json
-import time
+from datetime import timedelta
+import requests
+import logging
 import voluptuous as vol
-import homeassistant.helpers.config_validation as cv
 
-from homeassistant.helpers.entity import Entity
-from homeassistant.components.image_processing import DOMAIN, CONF_CONFIDENCE, ImageProcessingFaceEntity
-from homeassistant.const import CONF_NAME, CONF_API_KEY, CONF_URL, CONF_TIMEOUT, ATTR_NAME, ATTR_ENTITY_ID, CONF_SOURCE, CONF_ENTITY_ID
+from homeassistant.core import split_entity_id
+import homeassistant.helpers.config_validation as cv
+from homeassistant.const import CONF_NAME, CONF_API_KEY, ATTR_NAME
+from homeassistant.components.image_processing import (
+    PLATFORM_SCHEMA, ImageProcessingEntity, CONF_SOURCE, CONF_ENTITY_ID,
+    CONF_NAME, CONF_CONFIDENCE, ImageProcessingFaceEntity, DOMAIN)
 from homeassistant.exceptions import HomeAssistantError
+
 
 _LOGGER = logging.getLogger(__name__)
 
-MICROSOFT_FACE_IDENTIFY = 'microsoft_face_api_identify'
-
-FACE_API_URL = "api.cognitive.microsoft.com/face/v1.0/{0}"
-
-URL_VISION = "{0}/vision/v2.0/{1}"
-SERVICE_DETECT = 'detect'
-SERVICE_IDENTIFY = 'identify'
-SERVICE_SNAPSHOT = 'snapshot'
-
+SCAN_INTERVAL = timedelta(seconds=5)
+FACE_API_URL = "api.cognitive.microsoft.com/face/v1.0"
 CONF_AZURE_REGION  = "azure_region"
 CONF_GROUP = "group"
 CONF_RECOGNITION_MODEL  = "recognition_model"
 CONF_DETECTION_MODEL  = "detection_model"
 
+SERVICE_CREATE_GROUP = "create_group"
+SERVICE_CREATE_PERSON = "create_person"
+SERVICE_DELETE_GROUP = "delete_group"
+SERVICE_DELETE_PERSON = "delete_person"
+SERVICE_FACE_PERSON = "face_person"
+SERVICE_TRAIN_GROUP = "train_group"
 
-ATTR_CAMERA_ENTITY = 'camera_entity'
-ATTR_DESCRIPTION = 'description'
-ATTR_JSON = 'json'
+ATTR_CAMERA_ENTITY = "camera_entity"
+ATTR_GROUP = "group"
+ATTR_PERSON = "person"
+ATTR_RECOGNITION_MODEL = "recognition_model"
+
+
 ATTR_CONFIDENCE = 'confidence'
-ATTR_BRAND = 'brand'
 
-CONFIG_SCHEMA = vol.Schema({
-    DOMAIN: vol.Schema({
-        vol.Required(CONF_API_KEY): cv.string,
-        vol.Required(CONF_GROUP): cv.string,
-        vol.Optional(CONF_AZURE_REGION, default="useast2"): cv.string,
-        vol.Optional(CONF_CONFIDENCE, default=80): vol.All(
-            vol.Coerce(float), vol.Range(min=0, max=100)
-        ),
-        vol.Optional(CONF_RECOGNITION_MODEL, default="recognition_01"): cv.string,
-        vol.Optional(CONF_DETECTION_MODEL, default="detection_01"): cv.string,
-    }),
-}, extra=vol.ALLOW_EXTRA)
-
-SCHEMA_CALL_SERVICE = vol.Schema({
-    vol.Required(ATTR_CAMERA_ENTITY): cv.string,
+PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
+    vol.Required(CONF_API_KEY): cv.string,
+    vol.Required(CONF_GROUP): cv.string,
+    vol.Optional(CONF_AZURE_REGION, default="useast2"): cv.string,
+    vol.Optional(CONF_CONFIDENCE, default=80): vol.All(
+        vol.Coerce(float), vol.Range(min=0, max=100)
+    ),
+    vol.Optional(CONF_RECOGNITION_MODEL, default="recognition_01"): cv.string,
+    vol.Optional(CONF_DETECTION_MODEL, default="detection_01"): cv.string
 })
 
-async def async_setup_platform(hass, config, add_devices, discovery_info=None):
-    """Setup the platform."""
-    if MICROSOFT_FACE_IDENTIFY not in hass.data:
-        hass.data[MICROSOFT_FACE_IDENTIFY] = None
-    try:
-        devices = []
-        for camera in config[CONF_SOURCE]:            
-            device = MicrosoftFaceIdentifyDevice (
-                hass,
-                camera[CONF_ENTITY_ID],
-                config.get(CONF_AZURE_REGION), 
-                config.get(CONF_API_KEY),
-                config.get(CONF_GROUP),
-                config.get(CONF_CONFIDENCE),
-                config.get(CONF_RECOGNITION_MODEL),
-                config.get(CONF_DETECTION_MODEL),
-                camera.get(CONF_NAME),
-            )
-            devices.append(device)
-            # hass.data[MICROSOFT_FACE_IDENTIFY] = device
-        add_devices(devices)
-    except HomeAssistantError as err:
-        _LOGGER.error("Error calling setup: %s", err)
+SCHEMA_GROUP_SERVICE = vol.Schema({vol.Required(ATTR_NAME): cv.string})
 
-    # async def detect(service):
-    #     device = hass.data[MICROSOFT_FACE_IDENTIFY]
-    #     try:
-    #         await device.call_api(SERVICE_DETECT)
-    #     except HomeAssistantError as err:
-    #         _LOGGER.error("Error calling analyze: %s", err)
+SCHEMA_PERSON_SERVICE = SCHEMA_GROUP_SERVICE.extend(
+    {vol.Required(ATTR_GROUP): cv.slugify}
+)
 
-    # hass.services.async_register(DOMAIN, SERVICE_DETECT, detect)
+SCHEMA_FACE_SERVICE = vol.Schema(
+    {
+        vol.Required(ATTR_PERSON): cv.string,
+        vol.Required(ATTR_GROUP): cv.slugify,
+        vol.Required(ATTR_CAMERA_ENTITY): cv.entity_id,
+    }
+)
 
-    # async def identify(service):
-    #     device = hass.data[MICROSOFT_FACE_IDENTIFY]
-    #     try:
-    #         await device.call_api(SERVICE_IDENTIFY)
-    #     except HomeAssistantError as err:
-    #         _LOGGER.error("Error calling describe: %s", err)
+SCHEMA_TRAIN_SERVICE = vol.Schema({vol.Required(ATTR_GROUP): cv.slugify})
 
-    # hass.services.async_register(DOMAIN, SERVICE_IDENTIFY, identify)
 
-    # async def snapshot(service):
-    #     camera_entity = service.data.get(ATTR_CAMERA_ENTITY)
-    #     camera = hass.components.camera
-    #     device = hass.data[MICROSOFT_FACE_IDENTIFY]
-    #     image = None
-    #     try:
-    #         image = await camera.async_get_image(camera_entity)
-    #         device._image(image)
-    #     except HomeAssistantError as err:
-    #         _LOGGER.error("Error on receive image from entity: %s", err)
+def setup_platform(hass, config, add_devices, discovery_info=None):
+    """Set up the MicrosoftFaceApiIdentifyDevice."""
+    entities = []
+    for camera in config[CONF_SOURCE]:
+        entities.append(MicrosoftFaceApiIdentifyDevice(
+            hass,
+            camera.get(CONF_NAME),
+            camera[CONF_ENTITY_ID],
+            config[CONF_API_KEY],
+            config[CONF_GROUP],
+            config[CONF_AZURE_REGION],
+            config[CONF_CONFIDENCE],
+            config[CONF_RECOGNITION_MODEL],
+            config[CONF_DETECTION_MODEL],
+        ))
+    add_devices(entities)
 
-    # hass.services.async_register(DOMAIN, SERVICE_SNAPSHOT, snapshot, schema=SCHEMA_CALL_SERVICE)
-  
-    return True
+    async def async_create_group(service):
+        """Create a new person group."""
+        name = service.data[ATTR_NAME]
+        recognition_model = config[CONF_RECOGNITION_MODEL]
+        try:
+            url = f"https://{config[CONF_AZURE_REGION]}.{FACE_API_URL}/persongroups/{name}"
+            payload = json.dumps({
+                "name": name,
+                "recognitionModel": recognition_model
+            })
+            headers = {
+                'Content-Type': 'application/json',
+                'Ocp-Apim-Subscription-Key': config[CONF_API_KEY]
+            }
+            response = requests.request("PUT", url, headers=headers, data=payload)
+            print(response.text)
+        except HomeAssistantError as err:
+            _LOGGER.error("Can't create group '%s' with error: %s", name, err)
 
-class MicrosoftFaceIdentifyDevice(ImageProcessingFaceEntity):
-    """Representation of a platform."""
+    hass.services.async_register(
+        DOMAIN, SERVICE_CREATE_GROUP, async_create_group, schema=SCHEMA_GROUP_SERVICE
+    )
 
-    def __init__(self, hass, camera_entity, region, api_key, group, confidence, recognition_model, detection_model, name):
-        """Initialize the platform."""
-        self._hass = hass
-        self._camera = camera_entity
-        self._name = name
+class MicrosoftFaceApiIdentifyDevice(ImageProcessingFaceEntity):
+    """Perform a MicrosoftFaceApi call to detect and identify"""
+
+    ICON = 'mdi:account-search'
+
+    def __init__(self, hass, name, camera_entity, api_key, group, region, confidence, recognition_model, detection_model):
+        self.hass = hass
+        if name:  # Since name is optional.
+            self._name = name
+        else:
+            self._name = "Microsoft Face API {0}".format(
+                split_entity_id(camera_entity)[1])
+        self._camera_entity = camera_entity
         self._api_key = api_key
-        self._region = region
-        self._description = None
-        self._brand = None
-        self._json = None
-        self._image = None
-        self._confidence = confidence
         self._group = group
+        self._region = region
+        self._confidence = confidence
         self._recognition_model = recognition_model
         self._detection_model = detection_model
         self.faces = []
         self.total_faces = 0
+        self._store = {}
+        self.update_store()
 
+    def update_store(self):
+        url = f"https://{self._region}.{FACE_API_URL}/persongroups/{self._group}/persons?top=1000"
+        payload={}
+        headers = {
+            'Content-Type': 'application/json',
+            "Ocp-Apim-Subscription-Key": self._api_key,
+        }
+        response = requests.request("GET", url, headers=headers, data=payload)
+        if response.status_code == requests.codes.ok:
+            for person in response.json():
+                self._store[person['personId']] = {"name": person['name'], "userData": person['userData']}
 
-    @property
-    def name(self):
-        """Return the name of the platform."""
-        return self._name
-
-    @property
-    def description(self):
-        """Return the description of the platform."""
-        return self._description
-
-    @property
-    def brand(self):
-        """Return the brand of the platform."""
-        return self._brand
-
-    @property
-    def json(self):
-        """Return the JSON of the platform."""
-        return self._json
-
-    @property
-    def confidence(self):
-        """Return the confidence of the platform."""
-        return self._confidence
-    
-    @property
-    def camera_entity(self):
-        """Return camera entity id from process pictures."""
-        return self._camera
-
-    async def call_api(self, method, function, data=None, binary=False, params=None):
-        _LOGGER.info("MAKE API CALL")
-        # await self._hass.async_add_executor_job(self.post_api, service)
-
-    def post_api(self, service):
-        # try:
-        #     headers = {"Ocp-Apim-Subscription-Key": self._api_key,
-        #                "Content-Type": "application/octet-stream"}
-        #     params = None
-        #     url = URL_VISION.format(self._endpoint, service)
-        #     if service == SERVICE_ANALYZE:
-        #         params =  {"visualFeatures": self._visual_features}
-        #     if service == SERVICE_RECOGNIZE_TEXT:
-        #         params =  {"mode": self._text_mode}
-        #         url = URL_VISION.format(self._endpoint, "recognizeText")
-
-        #     self._json = None
-        #     self._description = None
-        #     self._brand = None
-        #     self._confidence = None
-        #     self._state = None
-        #     self.async_schedule_update_ha_state()
-
-        #     response = requests.post(url, headers=headers, params=params, data=self._image.content)
-        #     response.raise_for_status()
-            
-        #     if response.status_code == 200:
-        #         self._state = "ready"
-        #         self._json = response.json()
-        #         if "description" in self._json:
-        #             self._description = self._json["description"]["captions"][0]["text"]
-        #             self._confidence = round(100 * self._json["description"]["captions"][0]["confidence"])
-        #         if "brands" in self._json and len(self._json["brands"]) != 0:
-        #             self._brand = self._json["brands"][0]["name"]
-
-        #     if response.status_code == 202:
-        #         _LOGGER.info(response.headers)
-        #         url = response.headers["Operation-Location"]
-        #         time.sleep(5)
-        #         response = requests.get(url, headers=headers)
-        #         response.raise_for_status()
-        #         self._json = response.json()
-
-        #         if self._json["status"] == "Succeeded":
-        #             self._state = "ready"
-        #             for line in self._json["recognitionResult"]["lines"]:
-        #                 for word in line["words"]:
-        #                     if "confidence" not in word:
-        #                         self._description = word["text"] if self.description is None else self.description + " " + word["text"]
-
-        #     self.async_schedule_update_ha_state()
-
-        # except:
-        #     raise
-        _LOGGER.info("MAKE API CALL")
-    
-    async def async_process_image(self, image):
-        _LOGGER.info("async_process_image")
-        """Process image.
-        This method is a coroutine.
-        """
-        detect = []
+    def process_image(self, image):
+        """Perform identify on a single image."""
         try:
-            face_data = await self.call_api("post", "detect", image, binary=True)
-
+            known_faces = []
+            total = 0
+            self.async_schedule_update_ha_state()
+            headers = {"Ocp-Apim-Subscription-Key": self._api_key, "Content-Type": "application/octet-stream"}
+            url = f"https://{self._region}.{FACE_API_URL}/detect?returnFaceId=true&recognitionModel={self._recognition_model}&returnRecognitionModel=false&detectionModel={self._detection_model}&faceIdTimeToLive=1000"
+            headers = {
+                'Content-Type': 'application/octet-stream',
+                'Ocp-Apim-Subscription-Key': self._api_key
+            }
+            face_data = requests.request("POST", url, headers=headers, data=image).json()
+            _LOGGER.error("Identify: %s", face_data)
             if face_data:
                 face_ids = [data["faceId"] for data in face_data]
-                detect = await self.call_api(
-                    "post",
-                    "identify",
-                    {"faceIds": face_ids, "personGroupId": self._group},
-                )
-
+                url = f"https://{self._region}.{FACE_API_URL}/identify"
+                payload = json.dumps({
+                    "personGroupId": self._group,
+                    "faceIds": face_ids,
+                "maxNumOfCandidatesReturned": 10,
+                    "confidenceThreshold": (self._confidence / 100)
+                })
+                headers = {
+                    'Content-Type': 'application/json',
+                    "Ocp-Apim-Subscription-Key": self._api_key,
+                }
+                person_data = requests.request("POST", url, headers=headers, data=payload).json()
+                if person_data:
+                    for face in person_data:
+                        total += 1
+                        if not face["candidates"]:
+                            continue
+                        data = face["candidates"][0]
+                        name = ""
+                        name = "" + self._store[data['personId']]['name']
+                        # url = f"https://{self._region}.{FACE_API_URL}/persongroups/{self._group}/persons/{data['personId']}"
+                        # payload={}
+                        # person = requests.request("GET", url, headers=headers, data=payload).json()
+                        # name = person['name']
+                        known_faces.append(
+                            {ATTR_NAME: name, ATTR_CONFIDENCE: data["confidence"] * 100}
+                        )
+            self.async_process_faces(known_faces, total)
         except HomeAssistantError as err:
             _LOGGER.error("Can't process image on Microsoft face: %s", err)
             return
 
-        # Parse data
-        known_faces = []
-        total = 0
-        for face in detect:
-            total += 1
-            if not face["candidates"]:
-                continue
+    @property
+    def camera_entity(self):
+        """Return camera entity id from process pictures."""
+        return self._camera_entity
 
-            data = face["candidates"][0]
-            name = ""
-            # for s_name, s_id in self.store[self._group].items():
-            #     if data["personId"] == s_id:
-            #         name = s_name
-            #         break
+    @property
+    def icon(self):
+        """Icon to use in the frontend, if any."""
+        return self.ICON
 
-            known_faces.append(
-                {ATTR_NAME: name, ATTR_CONFIDENCE: data["confidence"] * 100}
-            )
-
-        self.async_process_faces(known_faces, total)
+    @property
+    def name(self):
+        """Return the name of the sensor."""
+        return self._name

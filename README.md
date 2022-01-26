@@ -16,8 +16,8 @@ image_processing:
     api_key: <your api key>
     azure_region: <your full endpoint>
     group: <Person group>
-    recognition_model: "recognition_1"
-    detection_model: "detection_1"
+    recognition_model: "recognition_04"
+    detection_model: "detection_03"
     confidence: 80
     source:
       - entity_id: camera.door
